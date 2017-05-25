@@ -51,6 +51,16 @@ func TestAdd(t *testing.T) {
 	}
 }
 
+func TestAddZero(t *testing.T) {
+	e0 := NewElement(ea)
+	e1 := NewElement("")
+	s := NewElement("")
+	s.Add(e0, e1)
+	if s.value.Cmp(e0.value) != 0 {
+		t.Error("ERROR: a + 0 != a")
+	}
+}
+
 func TestSub(t *testing.T) {
 	e0 := NewElement(ea)
 	e1 := NewElement(eb)
