@@ -19,6 +19,13 @@ type NodeAddr struct {
 	ID       uint64 // Unique ID
 }
 
+// The node capability type
+const (
+	VERIFY  = 0x01
+	SERVICE = 0x02
+	RELAY   = 0x03
+)
+
 const (
 	MSGCMDLEN     = 12
 	CMDOFFSET     = 4
@@ -29,7 +36,7 @@ const (
 	MAXBLKHDRCNT  = 2000
 	MAXINVHDRCNT  = 500
 	DIVHASHLEN    = 5
-	MINCONNCNT    = 4
+	MINCONNCNT    = 3
 	MAXREQBLKONCE = 16
 )
 const (
@@ -39,6 +46,8 @@ const (
 	MAXCHANBUF       = 512
 	PROTOCOLVERSION  = 0
 	PERIODUPDATETIME = 3 // Time to update and sync information with other nodes
+	HEARTBEAT        = 2
+	KEEPALIVETIMEOUT = 3
 )
 
 // The node state
@@ -60,7 +69,7 @@ type Noder interface {
 	GetRelay() bool
 	SetState(state uint32)
 	CompareAndSetState(old, new uint32) bool
-	UpdateTime(t time.Time)
+	UpdateRXTime(t time.Time)
 	LocalNode() Noder
 	DelNbrNode(id uint64) (Noder, bool)
 	AddNbrNode(Noder)
@@ -74,6 +83,7 @@ type Noder interface {
 	DumpInfo()
 	UpdateInfo(t time.Time, version uint32, services uint64,
 		port uint16, nonce uint64, relay uint8, height uint64)
+	ConnectSeeds()
 	Connect(nodeAddr string) error
 	Tx(buf []byte)
 	GetTime() int64
@@ -87,9 +97,9 @@ type Noder interface {
 
 	Xmit(interface{}) error
 	SynchronizeTxnPool()
-	GetMinerAddr() *crypto.PubKey
-	GetMinersAddrs() ([]*crypto.PubKey, uint64)
-	SetMinerAddr(pk *crypto.PubKey)
+	GetBookKeeperAddr() *crypto.PubKey
+	GetBookKeepersAddrs() ([]*crypto.PubKey, uint64)
+	SetBookKeeperAddr(pk *crypto.PubKey)
 	GetNeighborHeights() ([]uint64, uint64)
 	SyncNodeHeight()
 	CleanSubmittedTransactions(block *ledger.Block) error
@@ -105,6 +115,9 @@ type Noder interface {
 	StoreFlightHeight(height uint32)
 	GetFlightHeightCnt() int
 	RemoveFlightHeight(height uint32)
+	GetLastRXTime() time.Time
+	SetHeight(height uint64)
+	WaitForFourPeersStart()
 }
 
 func (msg *NodeAddr) Deserialization(p []byte) error {
@@ -121,4 +134,24 @@ func (msg NodeAddr) Serialization() ([]byte, error) {
 	}
 
 	return buf.Bytes(), err
+}
+
+func GetVerifyFlag() int {
+	return VERIFY
+}
+
+func GetServiceFlag() int {
+	return SERVICE
+}
+
+func GetRelayFlag() int {
+	return RELAY
+}
+
+func IsNodeTypeVerify(nodeType int) bool {
+	if nodeType == VERIFY {
+		return true
+	} else {
+		return false
+	}
 }

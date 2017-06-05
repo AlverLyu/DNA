@@ -2,7 +2,6 @@ package net
 
 import (
 	. "DNA/common"
-	"DNA/config"
 	"DNA/core/ledger"
 	"DNA/core/transaction"
 	"DNA/crypto"
@@ -16,18 +15,15 @@ type Neter interface {
 	SynchronizeTxnPool()
 	Xmit(interface{}) error
 	GetEvent(eventName string) *events.Event
-	GetMinersAddrs() ([]*crypto.PubKey, uint64)
+	GetBookKeepersAddrs() ([]*crypto.PubKey, uint64)
 	CleanSubmittedTransactions(block *ledger.Block) error
 	GetNeighborNoder() []protocol.Noder
 	Tx(buf []byte)
 }
 
-func StartProtocol(pubKey *crypto.PubKey) (Neter, protocol.Noder) {
-	seedNodes := config.Parameters.SeedList
+func StartProtocol(pubKey *crypto.PubKey, nodeType int) (Neter, protocol.Noder) {
+	net := node.InitNode(pubKey, nodeType)
+	net.ConnectSeeds()
 
-	net := node.InitNode(pubKey)
-	for _, nodeAddr := range seedNodes {
-		go net.Connect(nodeAddr)
-	}
 	return net, net
 }

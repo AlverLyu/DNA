@@ -2,8 +2,8 @@ package node
 
 import (
 	. "DNA/common"
+	. "DNA/common/config"
 	"DNA/common/log"
-	. "DNA/config"
 	"DNA/core/ledger"
 	"DNA/core/transaction"
 	"DNA/crypto"
@@ -17,13 +17,6 @@ import (
 	"runtime"
 	"sync/atomic"
 	"time"
-)
-
-// The node capability flag
-const (
-	RELAY        = 0x01
-	SERVER       = 0x02
-	NODESERVICES = 0x01
 )
 
 type node struct {
@@ -52,27 +45,28 @@ type node struct {
 	syncFlag      uint8
 	TxNotifyChan  chan int
 	flightHeights []uint32
+	lastContact   time.Time
 }
 
 func (node node) DumpInfo() {
-	fmt.Printf("Node info:\n")
-	fmt.Printf("\t state = %d\n", node.state)
-	fmt.Printf("\t id = 0x%x\n", node.id)
-	fmt.Printf("\t addr = %s\n", node.addr)
-	fmt.Printf("\t conn = %v\n", node.conn)
-	fmt.Printf("\t cap = %d\n", node.cap)
-	fmt.Printf("\t version = %d\n", node.version)
-	fmt.Printf("\t services = %d\n", node.services)
-	fmt.Printf("\t port = %d\n", node.port)
-	fmt.Printf("\t relay = %v\n", node.relay)
-	fmt.Printf("\t height = %v\n", node.height)
-	fmt.Printf("\t conn cnt = %v\n", node.link.connCnt)
+	log.Info("Node info:")
+	log.Info("\t state = ", node.state)
+	log.Info(fmt.Sprintf("\t id = 0x%x", node.id))
+	log.Info("\t addr = ", node.addr)
+	log.Info("\t conn = ", node.conn)
+	log.Info("\t cap = ", node.cap)
+	log.Info("\t version = ", node.version)
+	log.Info("\t services = ", node.services)
+	log.Info("\t port = ", node.port)
+	log.Info("\t relay = ", node.relay)
+	log.Info("\t height = ", node.height)
+	log.Info("\t conn cnt = ", node.link.connCnt)
 }
 
 func (node *node) UpdateInfo(t time.Time, version uint32, services uint64,
 	port uint16, nonce uint64, relay uint8, height uint64) {
 
-	node.UpdateTime(t)
+	node.UpdateRXTime(t)
 	node.id = nonce
 	node.version = version
 	node.services = services
@@ -95,17 +89,17 @@ func NewNode() *node {
 	return &n
 }
 
-func InitNode(pubKey *crypto.PubKey) Noder {
+func InitNode(pubKey *crypto.PubKey, nodeType int) Noder {
 	n := NewNode()
 
 	n.version = PROTOCOLVERSION
-	n.services = NODESERVICES
+	n.services = uint64(nodeType)
 	n.link.port = uint16(Parameters.NodePort)
 	n.relay = true
 	rand.Seed(time.Now().UTC().UnixNano())
-	// Fixme replace with the real random number
-	n.id = uint64(rand.Uint32())<<32 + uint64(rand.Uint32())
-	fmt.Printf("Init node ID to 0x%0x \n", n.id)
+	//id is the first 8 bytes of public key
+	n.id = ReadNodeID()
+	log.Info(fmt.Sprintf("Init node ID to 0x%x", n.id))
 	n.nbrNodes.init()
 	n.local = n
 	n.publicKey = pubKey
@@ -185,7 +179,12 @@ func (node node) GetHeight() uint64 {
 	return node.height
 }
 
-func (node *node) UpdateTime(t time.Time) {
+func (node *node) SetHeight(height uint64) {
+	//TODO read/write lock
+	node.height = height
+}
+
+func (node *node) UpdateRXTime(t time.Time) {
 	node.time = t
 }
 
@@ -262,19 +261,19 @@ func (node node) GetTime() int64 {
 	return t.UnixNano()
 }
 
-func (node node) GetMinerAddr() *crypto.PubKey {
+func (node node) GetBookKeeperAddr() *crypto.PubKey {
 	return node.publicKey
 }
 
-func (node node) GetMinersAddrs() ([]*crypto.PubKey, uint64) {
+func (node node) GetBookKeepersAddrs() ([]*crypto.PubKey, uint64) {
 	pks := make([]*crypto.PubKey, 1)
 	pks[0] = node.publicKey
 	var i uint64
 	i = 1
 	//TODO read lock
 	for _, n := range node.nbrNodes.List {
-		if n.GetState() == ESTABLISH {
-			pktmp := n.GetMinerAddr()
+		if n.GetState() == ESTABLISH && n.services != SERVICE {
+			pktmp := n.GetBookKeeperAddr()
 			pks = append(pks, pktmp)
 			i++
 		}
@@ -282,7 +281,7 @@ func (node node) GetMinersAddrs() ([]*crypto.PubKey, uint64) {
 	return pks, i
 }
 
-func (node *node) SetMinerAddr(pk *crypto.PubKey) {
+func (node *node) SetBookKeeperAddr(pk *crypto.PubKey) {
 	node.publicKey = pk
 }
 
@@ -293,6 +292,17 @@ func (node node) SyncNodeHeight() {
 			break
 		}
 		<-time.After(5 * time.Second)
+	}
+}
+
+func (node node) WaitForFourPeersStart() {
+	for {
+		log.Debug("WaitForFourPeersStart...")
+		cnt := node.local.GetNbrNodeCnt()
+		if cnt >= MINCONNCNT {
+			break
+		}
+		<-time.After(2 * time.Second)
 	}
 }
 
@@ -358,4 +368,8 @@ func (node *node) RemoveFlightHeight(height uint32) {
 	for _, h := range node.flightHeights {
 		log.Debug("after flight height ", h)
 	}
+}
+
+func (node node) GetLastRXTime() time.Time {
+	return node.time
 }

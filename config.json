@@ -1,19 +1,20 @@
 ﻿{
-  "ProtocolConfiguration": {
+  "Configuration": {
     "Magic": 7630401,
-    "CoinVersion": 23,
+    "Version": 23,
     "SeedList": [
-      "127.0.0.1:20338"
+      "127.0.0.1:20338",
+      "127.0.0.1:30338"
     ],
     "HttpJsonPort": 20336,
     "HttpLocalPort": 20337,
     "NodePort": 20338,
-    "MinerName": "c1",
-    "PrintLevel": 0,
+    "BookKeeperName": "c1",
+    "PrintLevel": 1,
     "IsTLS": false,
     "CertPath": "./sample-cert.pem",
     "KeyPath": "./sample-cert-key.pem",
     "CAPath": "./sample-ca.pem",
-    "MinerCount": 4
+    "MultiCoreNum": 4
   }
 }

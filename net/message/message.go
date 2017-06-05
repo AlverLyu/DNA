@@ -146,11 +146,13 @@ func AllocMsg(t string, length int) Messager {
 		log.Warn("Not supported message type - notfound")
 		return nil
 	case "ping":
-		log.Warn("Not supported message type - ping")
-		return nil
+		var msg ping
+		copy(msg.msgHdr.CMD[0:len(t)], t)
+		return &msg
 	case "pong":
-		log.Warn("Not supported message type - pong")
-		return nil
+		var msg pong
+		copy(msg.msgHdr.CMD[0:len(t)], t)
+		return &msg
 	case "reject":
 		log.Warn("Not supported message type - reject")
 		return nil
@@ -208,7 +210,7 @@ func HandleNodeMsg(node Noder, buf []byte, len int) error {
 		log.Error(fmt.Sprintf("Allocation message %s failed", s))
 		return errors.New("Allocation message failed")
 	}
-	// Todo attach a ndoe pointer to each message
+	// Todo attach a node pointer to each message
 	// Todo drop the message when verify/deseria packet error
 	msg.Deserialization(buf[:len])
 	msg.Verify(buf[MSGHDRLEN:len])

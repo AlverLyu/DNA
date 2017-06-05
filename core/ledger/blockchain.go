@@ -32,7 +32,7 @@ func NewBlockchainWithGenesisBlock() (*Blockchain, error) {
 	hashx := genesisBlock.Hash()
 	genesisBlock.hash = &hashx
 
-	height, err := DefaultLedger.Store.InitLevelDBStoreWithGenesisBlock(genesisBlock)
+	height, err := DefaultLedger.Store.InitLedgerStoreWithGenesisBlock(genesisBlock)
 	if err != nil {
 		return nil, NewDetailErr(err, ErrNoCode, "[Blockchain], InitLevelDBStoreWithGenesisBlock failed.")
 	}
@@ -49,9 +49,6 @@ func (bc *Blockchain) AddBlock(block *Block) error {
 	if err != nil {
 		return err
 	}
-
-	// Need atomic oepratoion
-	bc.BlockHeight = bc.BlockHeight + 1
 
 	return nil
 }
@@ -94,18 +91,18 @@ func (bc *Blockchain) ContainsTransaction(hash Uint256) bool {
 	return true
 }
 
-func (bc *Blockchain) GetMinersByTXs(others []*tx.Transaction) []*crypto.PubKey {
-	//TODO: GetMiners()
+func (bc *Blockchain) GetBookKeepersByTXs(others []*tx.Transaction) []*crypto.PubKey {
+	//TODO: GetBookKeepers()
 	//TODO: Just for TestUse
 
-	return StandbyMiners
+	return StandbyBookKeepers
 }
 
-func (bc *Blockchain) GetMiners() []*crypto.PubKey {
-	//TODO: GetMiners()
+func (bc *Blockchain) GetBookKeepers() []*crypto.PubKey {
+	//TODO: GetBookKeepers()
 	//TODO: Just for TestUse
 
-	return StandbyMiners
+	return StandbyBookKeepers
 }
 
 func (bc *Blockchain) CurrentBlockHash() Uint256 {

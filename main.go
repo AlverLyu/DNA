@@ -2,38 +2,104 @@ package main
 
 import (
 	. "DNA/client"
+	"DNA/common/config"
 	"DNA/common/log"
-	"DNA/config"
 	"DNA/consensus/dbft"
 	"DNA/core/ledger"
-	"DNA/core/store"
+	"DNA/core/store/ChainStore"
 	"DNA/core/transaction"
 	"DNA/crypto"
 	"DNA/net"
 	"DNA/net/httpjsonrpc"
+	"DNA/net/protocol"
 	"fmt"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 )
 
 const (
-	// The number of the CPU cores for parallel optimization,TODO set from config file
-	NCPU              = 4
-	DefaultMinerCount = 4
+	DefaultBookKeeperCount = 4
+	DefaultMultiCoreNum  = 4
 )
 
-var Version string
-
 func init() {
-	runtime.GOMAXPROCS(NCPU)
 	var path string = "./Log/"
 	log.CreatePrintLog(path)
+
+	var coreNum int
+	if (config.Parameters.MultiCoreNum > DefaultMultiCoreNum) {
+		coreNum = int(config.Parameters.MultiCoreNum)
+	} else {
+		coreNum = DefaultMultiCoreNum
+	}
+	log.Debug("The Core number is ", coreNum)
+	runtime.GOMAXPROCS(coreNum)
 }
 
 func fileExisted(filename string) bool {
 	_, err := os.Stat(filename)
 	return err == nil || os.IsExist(err)
+}
+
+func main() {
+	log.Trace("Node version: ", config.Version)
+	log.Info("0. Loading the Ledger")
+	ledger.DefaultLedger = new(ledger.Ledger)
+	ledger.DefaultLedger.Store = ChainStore.NewLedgerStore()
+	ledger.DefaultLedger.Store.InitLedgerStore(ledger.DefaultLedger)
+	transaction.TxStore = ledger.DefaultLedger.Store
+	crypto.SetAlg(config.Parameters.EncryptAlg)
+
+	log.Info("1. Open the account")
+	localClient, nodeType := OpenClientAndGetAccount()
+	if localClient == nil {
+		log.Error("Can't get local account.")
+		os.Exit(1)
+	}
+	issuer, err := localClient.GetDefaultAccount()
+	if err != nil {
+		log.Error(err)
+	}
+
+	log.Info("2. Set the BookKeeper")
+	bookKeeper := []*crypto.PubKey{}
+	var i uint32
+	for i = 0; i < DefaultBookKeeperCount; i++ {
+		bookKeeper = append(bookKeeper, getBookKeeper(i+1).PublicKey)
+	}
+	ledger.StandbyBookKeepers = bookKeeper
+	log.Debug("bookKeeper1.PublicKey", issuer.PublicKey)
+
+	log.Info("3. BlockChain init")
+	sampleBlockchain := InitBlockChain()
+	ledger.DefaultLedger.Blockchain = &sampleBlockchain
+
+	log.Info("4. Start the P2P networks")
+	time.Sleep(2 * time.Second)
+	neter, noder := net.StartProtocol(issuer.PublicKey, nodeType)
+	httpjsonrpc.RegistRpcNode(noder)
+	time.Sleep(20 * time.Second)
+	noder.SyncNodeHeight()
+	noder.WaitForFourPeersStart()
+	if protocol.IsNodeTypeVerify(nodeType) {
+		log.Info("5. Start DBFT Services")
+		dbftServices := dbft.NewDbftService(localClient, "logdbft", neter)
+		httpjsonrpc.RegistDbftService(dbftServices)
+		go dbftServices.Start()
+		time.Sleep(5 * time.Second)
+	}
+
+	log.Info("--Start the RPC interface")
+	go httpjsonrpc.StartRPCServer()
+	go httpjsonrpc.StartLocalServer()
+
+	time.Sleep(2 * time.Second)
+	for {
+		log.Trace("BlockHeight = ", ledger.DefaultLedger.Blockchain.BlockHeight)
+		time.Sleep(dbft.GenBlockTime)
+	}
 }
 
 func openLocalClient(name string) Client {
@@ -51,96 +117,49 @@ func openLocalClient(name string) Client {
 func InitBlockChain() ledger.Blockchain {
 	blockchain, err := ledger.NewBlockchainWithGenesisBlock()
 	if err != nil {
-		fmt.Println(err, "  BlockChain generate failed")
+		log.Error(err, "  BlockChain generate failed")
 	}
-	fmt.Println("  BlockChain generate completed. Func test Start...")
 	return *blockchain
 }
 
-func main() {
-	fmt.Printf("Node version: %s\n", Version)
-	fmt.Println("//**************************************************************************")
-	fmt.Println("//*** 0. Client open                                                     ***")
-	fmt.Println("//**************************************************************************")
-	ledger.DefaultLedger = new(ledger.Ledger)
-	ledger.DefaultLedger.Store = store.NewLedgerStore()
-	ledger.DefaultLedger.Store.InitLedgerStore(ledger.DefaultLedger)
-	transaction.TxStore = ledger.DefaultLedger.Store
-	crypto.SetAlg(crypto.P256R1)
-	fmt.Println("  Client set completed. Test Start...")
-	fmt.Println("//**************************************************************************")
-	fmt.Println("//*** 1. Generate [Account]                                              ***")
-	fmt.Println("//**************************************************************************")
-	var minerCount uint32 = DefaultMinerCount
-	if config.Parameters.MinerCount != 0 {
-		minerCount = config.Parameters.MinerCount
-	}
-	localclient := OpenClientAndGetAccount(minerCount)
-	if localclient == nil {
-		fmt.Println("Can't get local client.")
-		os.Exit(1)
-	}
-
-	issuer, err := localclient.GetDefaultAccount()
-	if err != nil {
-		fmt.Println(err)
-	}
-	fmt.Println("//**************************************************************************")
-	fmt.Println("//*** 2. Set Miner                                                     ***")
-	fmt.Println("//**************************************************************************")
-	miner := []*crypto.PubKey{}
+func clientIsDefaultBookKeeper(clientName string) bool {
 	var i uint32
-	for i = 0; i < minerCount; i++ {
-		miner = append(miner, getMiner(i+1).PublicKey)
+	for i = 0; i < DefaultBookKeeperCount; i++ {
+		c := fmt.Sprintf("c%d", i+1)
+		if strings.Compare(clientName, c) == 0 {
+			return true
+		}
 	}
-	ledger.StandbyMiners = miner
-	fmt.Println("miner1.PublicKey", issuer.PublicKey)
-
-	fmt.Println("//**************************************************************************")
-	fmt.Println("//*** 3. BlockChain init                                                 ***")
-	fmt.Println("//**************************************************************************")
-	sampleBlockchain := InitBlockChain()
-	ledger.DefaultLedger.Blockchain = &sampleBlockchain
-
-	time.Sleep(2 * time.Second)
-	neter, noder := net.StartProtocol(issuer.PublicKey)
-	httpjsonrpc.RegistRpcNode(noder)
-	time.Sleep(20 * time.Second)
-
-	noder.LocalNode().SyncNodeHeight()
-
-	fmt.Println("//**************************************************************************")
-	fmt.Println("//*** 5. Start DBFT Services                                             ***")
-	fmt.Println("//**************************************************************************")
-	dbftServices := dbft.NewDbftService(localclient, "logdbft", neter)
-	httpjsonrpc.RegistDbftService(dbftServices)
-	go dbftServices.Start()
-	time.Sleep(5 * time.Second)
-	fmt.Println("DBFT Services start completed.")
-	fmt.Println("//**************************************************************************")
-	fmt.Println("//*** Init Complete                                                      ***")
-	fmt.Println("//**************************************************************************")
-	go httpjsonrpc.StartRPCServer()
-	go httpjsonrpc.StartLocalServer()
-
-	time.Sleep(2 * time.Second)
-	for {
-		log.Trace("ledger.DefaultLedger.Blockchain.BlockHeight= ", ledger.DefaultLedger.Blockchain.BlockHeight)
-		time.Sleep(dbft.GenBlockTime)
-	}
+	return false
 }
 
-func OpenClientAndGetAccount(count uint32) Client {
-	clientName := config.Parameters.MinerName
-	fmt.Printf("The Miner name is %s\n", clientName)
-	if clientName == "" {
-		fmt.Printf("Miner name not be set at config file protocol.json, which schould be c1,c2,c3,c4. Now is %s\n", clientName)
-		return nil
+func OpenClientAndGetAccount() (clt Client, nodeType int) {
+	if "service" == config.Parameters.NodeType {
+		var sc Client
+		walletFile := "wallet.txt"
+		if fileExisted(walletFile) {
+			sc = OpenClient(walletFile, []byte("\x12\x34\x56"))
+		} else {
+			sc = CreateClient(walletFile, []byte("\x12\x34\x56"))
+		}
+		return sc, protocol.GetServiceFlag()
 	}
+
+	clientName := config.Parameters.BookKeeperName
+	log.Info("The BookKeeper name is ", clientName)
+	if clientName == "" {
+		log.Error("BookKeeper name not be set at config.json")
+		return nil, protocol.GetVerifyFlag()
+	}
+	isDefaultBookKeeper := clientIsDefaultBookKeeper(clientName)
 	var c []Client
-	c = make([]Client, count)
+	if isDefaultBookKeeper == true {
+		c = make([]Client, DefaultBookKeeperCount)
+	} else {
+		c = make([]Client, DefaultBookKeeperCount+1)
+	}
 	var i uint32
-	for i = 1; i <= count; i++ {
+	for i = 1; i <= DefaultBookKeeperCount; i++ {
 		w := fmt.Sprintf("wallet%d.txt", i)
 		if fileExisted(w) {
 			c[i-1] = OpenClient(w, []byte("\x12\x34\x56"))
@@ -150,15 +169,26 @@ func OpenClientAndGetAccount(count uint32) Client {
 	}
 	var n uint32
 	fmt.Sscanf(clientName, "c%d", &n)
-	return c[n-1]
+	if isDefaultBookKeeper == true {
+		return c[n-1], protocol.GetVerifyFlag()
+	}
+	if isDefaultBookKeeper == false {
+		w := fmt.Sprintf("wallet%d.txt", n)
+		if fileExisted(w) {
+			c[DefaultBookKeeperCount] = OpenClient(w, []byte("\x12\x34\x56"))
+		} else {
+			c[DefaultBookKeeperCount] = CreateClient(w, []byte("\x12\x34\x56"))
+		}
+	}
+	return c[DefaultBookKeeperCount], protocol.GetVerifyFlag()
 }
 
-func getMiner(n uint32) *Account {
+func getBookKeeper(n uint32) *Account {
 	w := fmt.Sprintf("wallet%d.txt", n)
 	c := OpenClient(w, []byte("\x12\x34\x56"))
 	account, err := c.GetDefaultAccount()
 	if err != nil {
-		fmt.Println("GetDefaultAccount failed.")
+		log.Error("GetDefaultAccount failed.")
 	}
 	return account
 }

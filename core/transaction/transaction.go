@@ -1,6 +1,12 @@
 package transaction
 
 import (
+	"crypto/sha256"
+	"errors"
+	"fmt"
+	"io"
+	"sort"
+
 	. "DNA/common"
 	"DNA/common/serialization"
 	"DNA/core/contract"
@@ -8,11 +14,6 @@ import (
 	sig "DNA/core/signature"
 	"DNA/core/transaction/payload"
 	. "DNA/errors"
-	"crypto/sha256"
-	"errors"
-	"fmt"
-	"io"
-	"sort"
 )
 
 //for different transaction types with different payload format
@@ -121,16 +122,7 @@ func (tx *Transaction) SerializeUnsigned(w io.Writer) error {
 			utxo.Serialize(w)
 		}
 	}
-	/*
-		//[]*BalanceInputs
-		err = serialization.WriteVarUint(w, uint64(len(tx.BalanceInputs)))
-		if err != nil {
-			return NewDetailErr(err, ErrNoCode, "Transaction item BalanceInputs length serialization failed.")
-		}
-		for _, balance := range tx.BalanceInputs {
-			balance.Serialize(w)
-		}
-	*/
+	// TODO BalanceInputs
 	//[]*Outputs
 	err = serialization.WriteVarUint(w, uint64(len(tx.Outputs)))
 	if err != nil {
@@ -168,15 +160,10 @@ func (tx *Transaction) Deserialize(r io.Reader) error {
 func (tx *Transaction) DeserializeUnsigned(r io.Reader) error {
 	var txType [1]byte
 	_, err := io.ReadFull(r, txType[:])
-	tx.TxType = TransactionType(txType[0])
 	if err != nil {
 		return err
 	}
-	/*
-		if txType[0] != byte(tx.TxType) {
-			return errors.New("Transaction Type is different.")
-		}
-	*/
+	tx.TxType = TransactionType(txType[0])
 	return tx.DeserializeUnsignedWithoutType(r)
 }
 
@@ -242,21 +229,7 @@ func (tx *Transaction) DeserializeUnsignedWithoutType(r io.Reader) error {
 			tx.UTXOInputs = append(tx.UTXOInputs, utxo)
 		}
 	}
-	/*
-		//balanceInputs
-		Len, err = serialization.ReadVarUint(r, 0)
-		if err != nil {
-			return err
-		}
-		for i := uint64(0); i < Len; i++ {
-			balanceInput := new(BalanceTxInput)
-			err = balanceInput.Deserialize(r)
-			if err != nil {
-				return err
-			}
-			tx.BalanceInputs = append(tx.BalanceInputs, balanceInput)
-		}
-	*/
+	//TODO balanceInputs
 	//Outputs
 	Len, err = serialization.ReadVarUint(r, 0)
 	if err != nil {
@@ -278,6 +251,7 @@ func (tx *Transaction) GetProgramHashes() ([]Uint160, error) {
 		return []Uint160{}, errors.New("[Transaction],GetProgramHashes transaction is nil.")
 	}
 	hashs := []Uint160{}
+	uniqHashes := []Uint160{}
 	// add inputUTXO's transaction
 	referenceWithUTXO_Output, err := tx.GetReference()
 	if err != nil {
@@ -330,13 +304,20 @@ func (tx *Transaction) GetProgramHashes() ([]Uint160, error) {
 				return nil, NewDetailErr(err, ErrNoCode, fmt.Sprintf("[Transaction], payload is illegal", k))
 			}
 		}
-
 	case TransferAsset:
 	case Record:
 	default:
 	}
-	sort.Sort(byProgramHashes(hashs))
-	return hashs, nil
+	//remove dupilicated hashes
+	uniq := make(map[Uint160]bool)
+	for _, v := range hashs {
+		uniq[v] = true
+	}
+	for k, _ := range uniq {
+		uniqHashes = append(uniqHashes, k)
+	}
+	sort.Sort(byProgramHashes(uniqHashes))
+	return uniqHashes, nil
 }
 
 func (tx *Transaction) SetPrograms(programs []*program.Program) {

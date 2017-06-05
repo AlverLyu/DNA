@@ -44,7 +44,8 @@ func (cxt *ContractContext) Add(contract *Contract, index int, parameter []byte)
 	log.Debug()
 	i := cxt.GetIndex(contract.ProgramHash)
 	if i < 0 {
-		return errors.New("Program Hash is not exist.")
+		log.Warn("Program Hash is not exist, using 0 by default")
+		i = 0
 	}
 	if cxt.Codes[i] == nil {
 		cxt.Codes[i] = contract.Code
@@ -70,6 +71,7 @@ func (cxt *ContractContext) AddContract(contract *Contract, pubkey *crypto.PubKe
 		log.Debug("Multi Sig: GetIndex:", index)
 
 		if index < 0 {
+			log.Error("The program hash is not exist.")
 			return errors.New("The program hash is not exist.")
 		}
 
